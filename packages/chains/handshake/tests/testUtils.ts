@@ -1,8 +1,9 @@
 import { randomBytes } from 'crypto';
 
 import { TokenMap } from '@rosen-bridge/tokens';
+import { EcdsaSignMediator } from '@rosen-chains/abstract-chain';
 
-import { HandshakeChain, HandshakeConfigs, TssSignFunction } from '../lib';
+import { HandshakeChain, HandshakeConfigs } from '../lib';
 import TestHandshakeNetwork from './network/testHandshakeNetwork';
 import * as testData from './testData';
 
@@ -37,17 +38,16 @@ export const configs: HandshakeConfigs = {
   lockScript: testData.lockScript,
 };
 
-export const mockedSignFn = () =>
-  Promise.resolve({
-    signature: '',
-    signatureRecovery: '',
-  });
+export const mockedSignMediator = {
+  sign: vi.fn(),
+  isInSign: vi.fn().mockResolvedValue(true),
+};
 
 export const generateChainObject = async (
   network: TestHandshakeNetwork,
-  signFn: TssSignFunction = mockedSignFn,
+  signMediator: EcdsaSignMediator = mockedSignMediator,
 ) => {
   const tokenMap = new TokenMap();
   await tokenMap.updateConfigByJson(testData.testTokenMap);
-  return new HandshakeChain(network, configs, tokenMap, signFn);
+  return new HandshakeChain(network, configs, tokenMap, signMediator);
 };

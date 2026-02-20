@@ -165,31 +165,28 @@ class RegtestNetwork extends AbstractHandshakeNetwork {
   try {
     console.log('=== Handshake HandshakeChain Integration Test ===\n');
 
-    // Step 1: Create 3-of-5 multisig
-    console.log('Step 1: Creating 3-of-5 Multisig...');
-    const keys = [];
-    for (let i = 0; i < 5; i++) {
-      keys.push(KeyRing.generate());
-    }
+    // Step 1: Create TSS aggregated key (simulated with single key for testing)
+    console.log('Step 1: Creating TSS lock address...');
 
-    const multisigScript = new Script();
-    multisigScript.pushSmall(3);
-    for (const key of keys) {
-      multisigScript.pushData(key.getPublicKey());
-    }
-    multisigScript.pushSmall(5);
-    multisigScript.pushOp(Script.opcodes.OP_CHECKMULTISIG);
-    multisigScript.compile();
+    // In production, this would be the aggregated public key from TSS ceremony
+    // For testing, we use a single key to simulate the aggregated key
+    const aggregatedKey = KeyRing.generate();
+    const aggregatedPubKey = aggregatedKey.getPublicKey();
 
-    const scriptHash = sha3.digest(multisigScript.encode());
-    const multisigAddr = Address.fromHash(scriptHash, 0);
-    console.log(`  Multisig Address: ${multisigAddr.toString(NETWORK)}`);
+    console.log(`  Aggregated Public Key: ${aggregatedPubKey.toString('hex')}`);
 
-    // Step 2: Fund multisig
-    console.log('\nStep 2: Funding Multisig (100 HNS)...');
+    // Create P2WPKH script for the aggregated public key
+    const lockScript = Script.fromPubkeyhash(aggregatedKey.getKeyHash());
+
+    // Create P2WPKH address
+    const lockAddr = Address.fromHash(aggregatedKey.getKeyHash(), 0); // version 0 = P2WPKH
+    console.log(`  Lock Address (regtest): ${lockAddr.toString(NETWORK)}`);
+
+    // Step 2: Fund lock address
+    console.log('\nStep 2: Funding lock address (100 HNS)...');
     const fundTx = await walletRequest('POST', `/wallet/${WALLET_ID}/send`, {
       outputs: [{
-        address: multisigAddr.toString(NETWORK),
+        address: lockAddr.toString(NETWORK),
         value: 100000000,
       }],
     });
@@ -203,7 +200,7 @@ class RegtestNetwork extends AbstractHandshakeNetwork {
     let vout = -1;
     let value = 0;
     for (let i = 0; i < txInfo.vout.length; i++) {
-      if (txInfo.vout[i].address.string === multisigAddr.toString(NETWORK)) {
+      if (txInfo.vout[i].address.string === lockAddr.toString(NETWORK)) {
         vout = i;
         value = Math.floor(txInfo.vout[i].value * 1000000);
         break;
@@ -230,29 +227,33 @@ class RegtestNetwork extends AbstractHandshakeNetwork {
     const tokenMap = new TokenMap();
     await tokenMap.updateConfigByJson(tokenMapConfig);
 
-    // Signing function - generates 3 signatures for 3-of-5 multisig
+    // Signing function - simulates TSS signing with aggregated key
     const signFunction = async (txHash: Uint8Array) => {
-      console.log(`  Signing transaction hash with 3 keys...`);
-      const sigs = [];
-      for (let i = 0; i < 3; i++) {
-        const sig = keys[i].sign(Buffer.from(txHash));
-        sigs.push(sig.toString('hex'));
-      }
-      // Return all 3 signatures concatenated with a separator
+      console.log(`  Signing transaction hash with aggregated key...`);
+      // In production, this would be a TSS signing ceremony
+      // For testing, we sign with the single key that represents the aggregated key
+      const sig = aggregatedKey.sign(Buffer.from(txHash));
       return {
-        signature: sigs.join(':'),
+        signature: sig.toString('hex'),
         signatureRecovery: '00',
       };
+    };
+
+    const mediator = {
+      sign: signFunction,
+      isInSign: async () => false,
     };
 
     const chain = new HandshakeChain(
       network,
       {
         addresses: {
-          lock: multisigAddr.toString('main'),
-          cold: multisigAddr.toString('main'),
-          lock_public_key: keys[0].getPublicKey().toString('hex'),
+          lock: lockAddr.toString('main'), // Use mainnet format for extractor
+          cold: lockAddr.toString('main'),
+          lock_public_key: aggregatedPubKey.toString('hex'),
         },
+        aggregatedPublicKey: aggregatedPubKey.toString('hex'),
+        txFeeSlippage: 10, // 10% tolerance for fee verification
         fee: 1000n,
         confirmations: {
           observation: 1,
@@ -260,11 +261,12 @@ class RegtestNetwork extends AbstractHandshakeNetwork {
           cold: 1,
           manual: 1,
         },
-        lockScript: multisigScript.encode().toString('hex'),
-        requiredSign: 3,
+        lockScript: lockScript.encode().toString('hex'),
+        requiredSign: 1, // TSS produces single aggregated signature
+        rwtId: 'test-rwt',
       },
       tokenMap,
-      signFunction,
+      mediator,
     );
 
     console.log('  HandshakeChain initialized');
@@ -303,7 +305,7 @@ class RegtestNetwork extends AbstractHandshakeNetwork {
 
     // Step 7: Sign transaction
     console.log('\nStep 7: Signing transaction...');
-    const signedTx = await chain.signTransaction(paymentTxs[0], 3);
+    const signedTx = await chain.signTransaction(paymentTxs[0], 1);
     console.log('  Transaction signed');
 
     // Step 8: Submit transaction

@@ -12,6 +12,8 @@ declare module 'hsd' {
     txid(): string;
     hasWitness(): boolean;
     getVirtualSize(): number;
+    getSize(): number;
+    getBaseSize(): number;
     signatureHash(
       index: number,
       prev: Script,
@@ -29,6 +31,8 @@ declare module 'hsd' {
     inputs: Input[];
     outputs: Output[];
     getVirtualSize(): number;
+    getSize(): number;
+    getBaseSize(): number;
     static fromRaw(data: Buffer): TX;
   }
 

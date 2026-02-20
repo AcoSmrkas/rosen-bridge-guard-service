@@ -7,6 +7,7 @@ export interface HandshakeConfigs extends ChainConfigs {
   aggregatedPublicKey: string; // Aggregated public key (TSS threshold signature scheme)
   txFeeSlippage: number; // Fee verification tolerance
   lockScript: string; // hex-encoded witnessScript for P2WSH multisig (32-byte witness program, hashed with SHA-256)
+  requiredSign: number; // Number of signatures required for m-of-n multisig
 }
 
 export interface HandshakeTransactionJsonModel
@@ -39,11 +40,6 @@ export interface HandshakeTx {
   inputs: HandshakeTxInput[];
   outputs: HandshakeTxOutput[];
 }
-
-export type TssSignFunction = (txHash: Uint8Array) => Promise<{
-  signature: string;
-  signatureRecovery: string;
-}>;
 
 export enum HandshakeNetworkFunction {
   // AbstractChainNetwork functions

@@ -13,6 +13,7 @@ import {
   AbstractUtxoChain,
   BlockInfo,
   ChainUtils,
+  EcdsaSignMediator,
   GET_BOX_API_LIMIT,
   NotEnoughAssetsError,
   NotEnoughValidBoxesError,
@@ -37,12 +38,7 @@ import HandshakeTransaction from './handshakeTransaction';
 import { estimateTxFee, getInputBoxId } from './handshakeUtils';
 import AbstractHandshakeNetwork from './network/abstractHandshakeNetwork';
 import Serializer from './serializer';
-import {
-  HandshakeConfigs,
-  HandshakeTx,
-  HandshakeUtxo,
-  TssSignFunction,
-} from './types';
+import { HandshakeConfigs, HandshakeTx, HandshakeUtxo } from './types';
 
 class HandshakeChain extends AbstractUtxoChain<HandshakeTx, HandshakeUtxo> {
   declare network: AbstractHandshakeNetwork;
@@ -51,7 +47,7 @@ class HandshakeChain extends AbstractUtxoChain<HandshakeTx, HandshakeUtxo> {
   NATIVE_TOKEN_ID = HNS;
   extractor: HandshakeRosenExtractor;
   protected boxSelection: BitcoinBoxSelection;
-  protected signFunction: TssSignFunction;
+  protected signMediator: EcdsaSignMediator;
   protected lockAddress: Address;
   protected lockScript: Buffer;
 
@@ -59,7 +55,7 @@ class HandshakeChain extends AbstractUtxoChain<HandshakeTx, HandshakeUtxo> {
     network: AbstractHandshakeNetwork,
     configs: HandshakeConfigs,
     tokens: TokenMap,
-    signFunction: TssSignFunction,
+    signMediator: EcdsaSignMediator,
     logger?: AbstractLogger,
   ) {
     super(network, configs, tokens, logger);
@@ -68,7 +64,7 @@ class HandshakeChain extends AbstractUtxoChain<HandshakeTx, HandshakeUtxo> {
       tokens,
       logger,
     );
-    this.signFunction = signFunction;
+    this.signMediator = signMediator;
     this.boxSelection = new BitcoinBoxSelection();
     this.lockAddress = Address.fromString(this.configs.addresses.lock);
     this.lockScript = Buffer.from(this.configs.lockScript, 'hex');
@@ -188,7 +184,7 @@ class HandshakeChain extends AbstractUtxoChain<HandshakeTx, HandshakeUtxo> {
         address: this.lockAddress.toString(),
         coinbase: false,
         hash: box.txId,
-        index: box.index,
+        index: Number(box.index),
       });
       mtx.addCoin(coin);
     });
@@ -229,15 +225,15 @@ class HandshakeChain extends AbstractUtxoChain<HandshakeTx, HandshakeUtxo> {
     });
 
     // Estimate fee for final signed transaction
+    // Match the witness structure created by buildSignedTransaction
     const tempMtx = mtx.clone();
     const tempWitness = new Script();
-    tempWitness.pushOp(Script.opcodes.OP_0);
-    // Add all required signatures (for m-of-n multisig where m = requiredSign)
+
+    // Witness structure for TSS: [signature, publicKey]
     // hsd signature: 64 bytes + 1 byte SIGHASH_ALL = 65 bytes
-    for (let j = 0; j < this.configs.requiredSign; j++) {
-      tempWitness.pushData(Buffer.alloc(65, 0));
-    }
-    tempWitness.pushData(this.lockScript);
+    tempWitness.pushData(Buffer.alloc(65, 0)); // Aggregated signature
+    tempWitness.pushData(Buffer.from(this.configs.aggregatedPublicKey, 'hex')); // Aggregated public key
+
     tempWitness.compile();
     const witnessStack = tempWitness.toStack();
     for (let i = 0; i < tempMtx.inputs.length; i++) {
@@ -255,7 +251,9 @@ class HandshakeChain extends AbstractUtxoChain<HandshakeTx, HandshakeUtxo> {
       throw new Error(`Insufficient funds: fee exceeds remaining balance`);
     }
     if (remainingHns > BigInt(Number.MAX_SAFE_INTEGER)) {
-      throw new Error(`Change amount too large for safe Number conversion: ${remainingHns}`);
+      throw new Error(
+        `Change amount too large for safe Number conversion: ${remainingHns}`,
+      );
     }
 
     const changeValue = Number(remainingHns);
@@ -534,12 +532,14 @@ class HandshakeChain extends AbstractUtxoChain<HandshakeTx, HandshakeUtxo> {
 
       const signMessage = mtx.signatureHash(i, scriptCode, value, type);
 
-      const signatureHex = this.signFunction(signMessage).then((response) => {
-        this.logger.debug(
-          `Input [${i}] of tx [${handshakeTx.txId}] is signed. signature: ${response.signature}`,
-        );
-        return response.signature;
-      });
+      const signatureHex = this.signMediator
+        .sign(signMessage)
+        .then((response) => {
+          this.logger.debug(
+            `Input [${i}] of tx [${handshakeTx.txId}] is signed. signature: ${response.signature}`,
+          );
+          return response.signature;
+        });
       signaturePromises.push(signatureHex);
     }
 
@@ -581,6 +581,48 @@ class HandshakeChain extends AbstractUtxoChain<HandshakeTx, HandshakeUtxo> {
         this.logger.warn(e.stack);
       }
     }
+  };
+
+  /**
+   * checks if a transaction is currently being signed
+   * @param transaction the transaction
+   * @returns true if at least one input is being signed
+   */
+  isTransactionInSign = async (
+    transaction: PaymentTransaction,
+  ): Promise<boolean> => {
+    const mtx = Serializer.deserialize(transaction.txBytes);
+    const handshakeTx = transaction as HandshakeTransaction;
+
+    const signStatuses: boolean[] = [];
+    for (let i = 0; i < handshakeTx.inputUtxos.length; i++) {
+      const input = JsonBigInt.parse(
+        handshakeTx.inputUtxos[i],
+      ) as HandshakeUtxo;
+
+      // Recreate the coin for signature hash calculation
+      const coin = Coin.fromJSON({
+        version: 0,
+        height: -1,
+        value: Number(input.value),
+        address: this.lockAddress.toString(),
+        coinbase: false,
+        hash: input.txId,
+        index: Number(input.index),
+      });
+
+      // For P2WSH multisig, use the witnessScript for signature hash calculation
+      const scriptCode = Script.decode(this.lockScript);
+      const value = coin.value;
+      const type = 0x01; // SIGHASH_ALL
+
+      const signMessage = mtx.signatureHash(i, scriptCode, value, type);
+
+      const isInSign = await this.signMediator.isInSign(signMessage);
+      signStatuses.push(isInSign);
+    }
+
+    return signStatuses.some((status) => status);
   };
 
   /**
@@ -694,46 +736,40 @@ class HandshakeChain extends AbstractUtxoChain<HandshakeTx, HandshakeUtxo> {
     box.txId + '.' + box.index;
 
   /**
-   * inserts signatures into MTX for P2WSH multisig
+   * inserts signatures into MTX using TSS aggregated signature
    *
-   * Witness structure per input: [OP_0, signature, witnessScript]
-   * - OP_0: dummy element required by OP_CHECKMULTISIG
-   * - signature: aggregated signature from the threshold signature scheme (TSS)
-   * - witnessScript: the m-of-n multisig script (32-byte witness program)
+   * Uses threshold signature scheme (TSS) similar to Doge/Bitcoin chains:
+   * - Single aggregated signature per input (not multiple individual signatures)
+   * - Signature validates against the aggregated public key
+   * - Witness structure: [signature, publicKey] for P2WPKH-like validation
    *
    * @param txBytes serialized transaction
-   * @param signatures generated signatures by signer service (one signature per input from TSS)
+   * @param signatures generated signatures by signer service (one aggregated signature per input from TSS)
    * @returns a signed transaction (in MTX format)
    */
   protected buildSignedTransaction = (
     txBytes: Uint8Array,
-    signatures: string[],
+    signatures: string[], // one aggregated signature per input
   ): MTX => {
-    const mtx = Serializer.deserialize(txBytes);
-    const opcodes = Script.opcodes;
+    const mtx = MTX.fromRaw(Buffer.from(txBytes));
 
-    // P2WSH multisig: each input gets its own witness with its signature(s)
     for (let i = 0; i < signatures.length; i++) {
+      const sigHex = signatures[i];
+
       const witness = new Script();
 
-      // OP_0 (dummy element for OP_CHECKMULTISIG off-by-one bug)
-      witness.pushOp(opcodes.OP_0);
+      // Append SIGHASH_ALL (0x01) to the aggregated signature
+      const signature = Buffer.concat([
+        Buffer.from(sigHex, 'hex'),
+        Buffer.from([0x01]),
+      ]);
 
-      // Check if we have multiple signatures (for m-of-n where m > 1)
-      // Signatures are separated by ':' when multiple
-      const sigParts = signatures[i].split(':');
+      // Push aggregated signature
+      witness.pushData(signature);
 
-      for (const sigHex of sigParts) {
-        // Add signature with SIGHASH_ALL
-        const signature = Buffer.concat([
-          Buffer.from(sigHex, 'hex'),
-          Buffer.from([0x01]), // SIGHASH_ALL
-        ]);
-        witness.pushData(signature);
-      }
+      // Push aggregated public key (from TSS)
+      witness.pushData(Buffer.from(this.configs.aggregatedPublicKey, 'hex'));
 
-      // Add witnessScript (required for P2WSH validation)
-      witness.pushData(this.lockScript);
       witness.compile();
 
       mtx.inputs[i].witness.fromStack(witness.toStack());

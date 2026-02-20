@@ -1,11 +1,20 @@
 import { TokenMap } from '@rosen-bridge/tokens';
 import {
+<<<<<<< HEAD
+=======
+  BlockInfo,
+  EcdsaSignMediator,
+>>>>>>> handshake-chain
   NotEnoughAssetsError,
   NotEnoughValidBoxesError,
   TransactionType,
 } from '@rosen-chains/abstract-chain';
 
+<<<<<<< HEAD
 import { HandshakeChain, HandshakeTransaction, TssSignFunction } from '../lib';
+=======
+import { HandshakeChain, HandshakeTransaction, HandshakeTx } from '../lib';
+>>>>>>> handshake-chain
 import TestHandshakeNetwork from './network/testHandshakeNetwork';
 import * as testData from './testData';
 import * as testUtils from './testUtils';
@@ -325,7 +334,11 @@ describe('HandshakeChain', () => {
         network,
         newConfigs,
         tokenMap,
+<<<<<<< HEAD
         testUtils.mockedSignFn,
+=======
+        testUtils.mockedSignMediator,
+>>>>>>> handshake-chain
       );
 
       // run test
@@ -336,6 +349,39 @@ describe('HandshakeChain', () => {
     });
   });
 
+<<<<<<< HEAD
+=======
+  describe('verifyLockTransactionExtraConditions', () => {
+    const network = new TestHandshakeNetwork();
+
+    /**
+     * @target HandshakeChain.verifyLockTransactionExtraConditions should return true
+     * @dependencies
+     * @scenario
+     * - mock a lock transaction and blockInfo
+     * - run test
+     * - check returned value
+     * @expected
+     * - it should return true
+     */
+    it('should return true', async () => {
+      // mock a lock transaction and blockInfo
+      const lockTx = {} as HandshakeTx;
+      const blockInfo = {} as BlockInfo;
+
+      // run test
+      const handshakeChain = await testUtils.generateChainObject(network);
+      const result = await handshakeChain.verifyLockTransactionExtraConditions(
+        lockTx,
+        blockInfo,
+      );
+
+      // check returned value
+      expect(result).toEqual(true);
+    });
+  });
+
+>>>>>>> handshake-chain
   describe('isTxValid', () => {
     const network = new TestHandshakeNetwork();
 
@@ -428,6 +474,7 @@ describe('HandshakeChain', () => {
      */
     it('should return PaymentTransaction of the signed transaction', async () => {
       // mock a sign function to return signature
+<<<<<<< HEAD
       const signFunction: TssSignFunction = async (hash: Uint8Array) => {
         const hashHex = Buffer.from(hash).toString('hex');
         if (hashHex === testData.transaction2HashMessage0)
@@ -445,6 +492,28 @@ describe('HandshakeChain', () => {
             signature: testData.transaction2Signature0,
             signatureRecovery: '',
           };
+=======
+      const signMediator: EcdsaSignMediator = {
+        sign: async (hash: Uint8Array) => {
+          const hashHex = Buffer.from(hash).toString('hex');
+          if (hashHex === testData.transaction2HashMessage0)
+            return {
+              signature: testData.transaction2Signature0,
+              signatureRecovery: '',
+            };
+          else if (hashHex === testData.transaction2HashMessage1)
+            return {
+              signature: testData.transaction2Signature1,
+              signatureRecovery: '',
+            };
+          else
+            return {
+              signature: testData.transaction2Signature0,
+              signatureRecovery: '',
+            };
+        },
+        isInSign: vi.fn(),
+>>>>>>> handshake-chain
       };
 
       // mock PaymentTransaction of unsigned transaction
@@ -455,7 +524,11 @@ describe('HandshakeChain', () => {
       // run test
       const handshakeChain = await testUtils.generateChainObject(
         network,
+<<<<<<< HEAD
         signFunction,
+=======
+        signMediator,
+>>>>>>> handshake-chain
       );
       const result = await handshakeChain.signTransaction(paymentTx, 0);
 
@@ -481,6 +554,7 @@ describe('HandshakeChain', () => {
      */
     it('should throw error when at least signing of one message is failed', async () => {
       // mock a sign function to throw error
+<<<<<<< HEAD
       const signFunction: TssSignFunction = async (hash: Uint8Array) => {
         if (
           Buffer.from(hash).toString('hex') ===
@@ -491,6 +565,21 @@ describe('HandshakeChain', () => {
             signatureRecovery: '',
           };
         else throw Error(`TestError: sign failed`);
+=======
+      const signMediator: EcdsaSignMediator = {
+        sign: async (hash: Uint8Array) => {
+          if (
+            Buffer.from(hash).toString('hex') ===
+            testData.transaction2HashMessage0
+          )
+            return {
+              signature: testData.transaction2Signature0,
+              signatureRecovery: '',
+            };
+          else throw Error(`TestError: sign failed`);
+        },
+        isInSign: vi.fn(),
+>>>>>>> handshake-chain
       };
 
       // mock PaymentTransaction of unsigned transaction
@@ -501,7 +590,11 @@ describe('HandshakeChain', () => {
       // run test
       const handshakeChain = await testUtils.generateChainObject(
         network,
+<<<<<<< HEAD
         signFunction,
+=======
+        signMediator,
+>>>>>>> handshake-chain
       );
 
       await expect(async () => {
@@ -510,6 +603,79 @@ describe('HandshakeChain', () => {
     });
   });
 
+<<<<<<< HEAD
+=======
+  describe('isTransactionInSign', () => {
+    const network = new TestHandshakeNetwork();
+
+    /**
+     * @target HandshakeChain.isTransactionInSign should return true if transaction is in sign
+     * @dependencies
+     * @scenario
+     * - mock isInSign to return true
+     * - run test
+     * - check returned value
+     * @expected
+     * - it should return true
+     */
+    it('should return true if transaction is in sign', async () => {
+      // mock isInSign to return true
+      const signMediator: EcdsaSignMediator = {
+        sign: vi.fn(),
+        isInSign: vi.fn().mockResolvedValue(true),
+      };
+
+      // mock PaymentTransaction
+      const paymentTx = HandshakeTransaction.fromJson(
+        testData.transaction2PaymentTransaction,
+      );
+
+      // run test
+      const handshakeChain = await testUtils.generateChainObject(
+        network,
+        signMediator,
+      );
+      const result = await handshakeChain.isTransactionInSign(paymentTx);
+
+      // check returned value
+      expect(result).toEqual(true);
+    });
+
+    /**
+     * @target HandshakeChain.isTransactionInSign should return false if transaction is not in sign
+     * @dependencies
+     * @scenario
+     * - mock isInSign to return false
+     * - run test
+     * - check returned value
+     * @expected
+     * - it should return false
+     */
+    it('should return false if transaction is not in sign', async () => {
+      // mock isInSign to return false
+      const signMediator: EcdsaSignMediator = {
+        sign: vi.fn(),
+        isInSign: vi.fn().mockResolvedValue(false),
+      };
+
+      // mock PaymentTransaction
+      const paymentTx = HandshakeTransaction.fromJson(
+        testData.transaction2PaymentTransaction,
+      );
+
+      // run test
+      const handshakeChain = await testUtils.generateChainObject(
+        network,
+        signMediator,
+      );
+      const result = await handshakeChain.isTransactionInSign(paymentTx);
+
+      // check returned value
+      expect(result).toEqual(false);
+    });
+  });
+
+>>>>>>> handshake-chain
   describe('verifyPaymentTransaction', () => {
     const network = new TestHandshakeNetwork();
 
@@ -591,6 +757,45 @@ describe('HandshakeChain', () => {
     });
   });
 
+<<<<<<< HEAD
+=======
+  describe('rawTxToPaymentTransaction', () => {
+    const network = new TestHandshakeNetwork();
+
+    /**
+     * @target HandshakeChain.rawTxToPaymentTransaction should construct transaction successfully
+     * @dependencies
+     * @scenario
+     * - mock getUtxo for inputs
+     * - run test
+     * - check returned value
+     * @expected
+     * - it should return construction of PaymentTransaction correctly
+     *   (txId, eventId, txType and inputUtxos should be as expected)
+     */
+    it('should construct transaction successfully', async () => {
+      // mock getUtxo for inputs
+      const getUtxoSpy = vi.spyOn(network, 'getUtxo');
+      getUtxoSpy.mockResolvedValueOnce(testData.lockAddressUtxos[0]);
+
+      // run test
+      const handshakeChain = await testUtils.generateChainObject(network);
+      const transaction1 = JSON.parse(testData.transaction1PaymentTransaction);
+      const result = await handshakeChain.rawTxToPaymentTransaction(
+        transaction1.txBytes,
+      );
+
+      // check returned value
+      expect(result.txId).toEqual(transaction1.txId);
+      expect(result.eventId).toEqual('');
+      expect(result.txType).toEqual(TransactionType.manual);
+      expect(Buffer.from(result.txBytes).toString('hex')).toEqual(
+        transaction1.txBytes,
+      );
+    });
+  });
+
+>>>>>>> handshake-chain
   describe('getMinimumNativeToken', () => {
     const network = new TestHandshakeNetwork();
 
